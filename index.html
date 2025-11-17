@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Simulador de Restauração de Paisagem</title>
+<style>
+  :root{
+    --bg:#0f1724; --card:#0b1220; --muted:#94a3b8; --accent:#10b981;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:linear-gradient(180deg,#071023,#0b1b2b);color:#e6eef6}
+  .wrap{display:flex;gap:12px;max-width:1400px;margin:18px auto;padding:12px;box-sizing:border-box}
+  .left{background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;flex:1;min-width:600px}
+  .right{width:320px;background:rgba(255,255,255,0.03);border-radius:10px;padding:12px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  h1{font-size:16px;margin:0}
+  canvas{display:block;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);width:100%;border-radius:6px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+  button{background:transparent;border:1px solid rgba(255,255,255,0.08);padding:8px 10px;border-radius:8px;color:inherit;cursor:pointer}
+  button.primary{background:linear-gradient(90deg,var(--accent),#06b6d4);color:#021118;border:none}
+  .stat{background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;margin-bottom:8px}
+  label{display:block;font-size:13px;color:var(--muted);margin-top:6px}
+  input[type=range]{width:100%}
+  .metrics{display:flex;flex-direction:column;gap:6px}
+  .small{font-size:13px;color:var(--muted)}
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .legend .item{display:flex;gap:6px;align-items:center}
+  .box{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,0.15)}
+  .footer{font-size:12px;color:var(--muted);margin-top:8px}
+  .row{display:flex;gap:8px;align-items:center}
+  textarea{width:100%;height:80px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit;padding:6px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="left">
+    <header>
+      <div>
+        <h1>Simulador de Restauração de Paisagem</h1>
+        <div class="small">Clique nas células para alternar estados. Use Run/Step para simular.</div>
+      </div>
+      <div style="margin-left:auto" class="controls">
+        <button id="reset">Reset</button>
+        <button id="randomize">Randomize</button>
+        <button id="nucleate" class="primary">Nucleate</button>
+        <button id="step">Step</button>
+        <button id="run">Run</button>
+        <button id="export">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+      </div>
+    </header>
+
+    <canvas id="canvas" width="1000" height="700"></canvas>
+
+    <div style="display:flex;gap:10px;margin-top:8px;align-items:center">
+      <div class="stat" style="flex:1">
+        <div style="display:flex;justify-content:space-between">
+          <div><strong>Tick:</strong> <span id="tick">0</span></div>
+          <div><strong>Velocidade:</strong> <span id="speedLabel">6</span> ms</div>
+        </div>
+        <input id="speed" type="range" min="20" max="400" value="60">
+      </div>
+      <div class="stat" style="width:260px">
+        <div style="display:flex;justify-content:space-between">
+          <div><strong>Modo clique</strong></div>
+          <div id="modeLabel">Alternar</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button id="modeToggle">Mudar modo</button>
+          <button id="clearRest">Clear restored</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <div class="stat" style="flex:1">
+        <label>Legenda</label>
+        <div class="legend">
+          <div class="item"><div class="box" style="background:#6b3"></div> Natural</div>
+          <div class="item"><div class="box" style="background:#8f8"></div> Restaurada</div>
+          <div class="item"><div class="box" style="background:#fc0"></div> Em restauração</div>
+          <div class="item"><div class="box" style="background:#7a5230"></div> Degradada</div>
+        </div>
+      </div>
+      <div class="stat" style="width:320px">
+        <label class="small">Instruções curtas</label>
+        <div class="small">Clique: altera estado. Shift+clique: aplicar nucleação local (5x5). Run aplica regras automaticamente a cada tick.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <aside class="right">
+    <div class="stat">
+      <label>Número de células por lado: <span id="gridSizeLabel">30</span></label>
+      <input id="gridSize" type="range" min="10" max="80" value="30">
+      <label>Regeneração natural por vizinho (p): <span id="pRegLabel">0.15</span></label>
+      <input id="pReg" type="range" min="0" max="1" step="0.01" value="0.15">
+      <label>Dispersão (prob. de semente de célula restaurada): <span id="pDispLabel">0.25</span></label>
+      <input id="pDisp" type="range" min="0" max="1" step="0.01" value="0.25">
+      <label>Sucesso restauração ativa (ticks até virar restaurada): <span id="restTimeLabel">3</span></label>
+      <input id="restTime" type="range" min="1" max="10" step="1" value="3">
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button id="apply">Aplicar parâmetros</button>
+        <button id="seedRandom">Seed Random</button>
+      </div>
+    </div>
+
+    <div class="stat metrics">
+      <div><strong>% Cobertura (restaurada+natural):</strong> <span id="coverPct">0%</span></div>
+      <div><strong>Tamanho maior mancha:</strong> <span id="largest">0</span> células</div>
+      <div><strong>Nº de manchas:</strong> <span id="patches">0</span></div>
+      <div><strong>Células totais:</strong> <span id="totalCells">0</span></div>
+    </div>
+
+    <div class="stat">
+      <label>Importar JSON (cole aqui)</label>
+      <textarea id="importArea" placeholder='{"size":30,"cells":[...]}'> </textarea>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button id="doImport">Importar</button>
+        <button id="download">Download JSON</button>
+      </div>
+    </div>
+
+    <div class="footer">Protótipo didático — rules simples para aula. Desenvolvido para demonstrar nucleação, dispersão e restauração.</div>
+  </aside>
+</div>
+
+<script>
+/* Simulador de Restauração de Paisagem - JavaScript
+   Estados:
+     0 = Degradada
+     1 = Em restauração (ativa) [contador ticks até converter]
+     2 = Restaurada
+     3 = Natural (referência)
+*/
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let sizeInput = document.getElementById('gridSize');
+let pRegInput = document.getElementById('pReg');
+let pDispInput = document.getElementById('pDisp');
+let restTimeInput = document.getElementById('restTime');
+
+const gridSizeLabel = document.getElementById('gridSizeLabel');
+const pRegLabel = document.getElementById('pRegLabel');
+const pDispLabel = document.getElementById('pDispLabel');
+const restTimeLabel = document.getElementById('restTimeLabel');
+
+const totalCellsEl = document.getElementById('totalCells');
+const coverPctEl = document.getElementById('coverPct');
+const largestEl = document.getElementById('largest');
+const patchesEl = document.getElementById('patches');
+const tickEl = document.getElementById('tick');
+const speed = document.getElementById('speed');
+const speedLabel = document.getElementById('speedLabel');
+
+let gridN = parseInt(sizeInput.value);
+let cellW, cellH;
+let cells = []; // array of objects {state, timer}
+let running = false;
+let tick = 0;
+let interval = +speed.value;
+let modeToggle = 0; // 0 = cycle through states when click, 1 = set to 'em restauração'
+let history = [];
+
+function resizeCanvas(){
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = canvas.clientWidth = document.querySelector('.left').clientWidth - 24;
+  canvas.height = canvas.clientHeight = Math.max(400, window.innerHeight * 0.62);
+  computeCellSize();
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function computeCellSize(){
+  cellW = Math.floor(canvas.width / gridN);
+  cellH = Math.floor(canvas.height / gridN);
+}
+
+function makeEmptyGrid(n){
+  cells = new Array(n*n).fill(0).map(()=>({state:0,timer:0}));
+  totalCellsEl.textContent = n*n;
+}
+
+function index(i,j){ return i*gridN + j; }
+function inBounds(i,j){ return i>=0 && j>=0 && i<gridN && j<gridN; }
+
+function randomizeGrid(fillProb=0.12){
+  for(let i=0;i<gridN;i++){
+    for(let j=0;j<gridN;j++){
+      const idx = index(i,j);
+      const r = Math.random();
+      if(r < fillProb/2){ cells[idx].state = 3; } // some natural
+      else if(r < fillProb){ cells[idx].state = 2; } // some restored
+      else { cells[idx].state = 0; }
+      cells[idx].timer = 0;
+    }
+  }
+  computeMetrics();
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  for(let i=0;i<gridN;i++){
+    for(let j=0;j<gridN;j++){
+      const c = cells[index(i,j)];
+      let color = '#7a5230'; // degraded
+      if(c.state === 3) color = '#2e7d32';
+      else if(c.state === 2) color = '#8f9f5b';
+      else if(c.state === 1) color = '#fabc04';
+      ctx.fillStyle = color;
+      ctx.fillRect(j*cellW, i*cellH, cellW-1, cellH-1);
+    }
+  }
+  // grid lines (subtle)
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 1;
+  for(let i=0;i<=gridN;i++){
+    ctx.beginPath();
+    ctx.moveTo(0, i*cellH);
+    ctx.lineTo(cellW*gridN, i*cellH);
+    ctx.stroke();
+  }
+  for(let j=0;j<=gridN;j++){
+    ctx.beginPath();
+    ctx.moveTo(j*cellW, 0);
+    ctx.lineTo(j*cellW, cellH*gridN);
+    ctx.stroke();
+  }
+}
+
+function neighbors(i,j){
+  const nb=[];
+  [[-1,0],[1,0],[0,-1],[0,1]].forEach(d=>{
+    const ni=i+d[0], nj=j+d[1];
+    if(inBounds(ni,nj)) nb.push(index(ni,nj));
+  });
+  return nb;
+}
+
+function stepSimulation(){
+  tick++;
+  tickEl.textContent = tick;
+  const pReg = +pRegInput.value;
+  const pDisp = +pDispInput.value;
+  const restTicks = +restTimeInput.value;
+
+  // copy current states for synchronous update
+  const next = cells.map(c => ({state:c.state,timer:c.timer}));
+
+  for(let i=0;i<gridN;i++){
+    for(let j=0;j<gridN;j++){
+      const idx = index(i,j);
+      const cell = cells[idx];
+
+      if(cell.state === 0){
+        // degraded: chance of natural regeneration based on neighbor restored/natural
+        const nb = neighbors(i,j);
+        let sources = 0;
+        nb.forEach(nidx=>{
+          const s = cells[nidx].state;
+          if(s===2 || s===3) sources++;
+        });
+        if(sources>0){
+          // probability increases with number of sources
+          const prob = 1 - Math.pow(1 - pDisp, sources); // combined seed arrival prob
+          // but also small base chance pReg
+          if(Math.random() < Math.max(pReg, prob* pReg)){
+            next[idx].state = 2; // becomes restored via natural regen
+            next[idx].timer = 0;
+          }
+        }
+      } else if(cell.state === 1){
+        // in active restoration: advance timer -> restored after restTicks
+        next[idx].timer = cell.timer + 1;
+        if(next[idx].timer >= restTicks){
+          next[idx].state = 2;
+          next[idx].timer = 0;
+        }
+      } else if(cell.state === 2){
+        // restored: small chance to become natural (very small) OR stay
+        // could implement succession - keep simple
+      } else if(cell.state === 3){
+        // natural: stable
+      }
+    }
+  }
+
+  // apply next states
+  cells = next;
+  computeMetrics();
+  draw();
+}
+
+function computeMetrics(){
+  const total = gridN*gridN;
+  let cover = 0;
+  // build adjacency for restored+natural
+  const visited = new Uint8Array(total);
+  const adj = {}; // implicit using neighbors
+  for(let k=0;k<total;k++){
+    if(cells[k].state===2 || cells[k].state===3) cover++;
+  }
+  // compute connected components (4-neigh) for restored+natural
+  let patches = 0;
+  let largest = 0;
+  for(let i=0;i<gridN;i++){
+    for(let j=0;j<gridN;j++){
+      const idx = index(i,j);
+      if(visited[idx]) continue;
+      if(cells[idx].state===2 || cells[idx].state===3){
+        // bfs
+        patches++;
+        let size = 0;
+        const q=[idx];
+        visited[idx]=1;
+        while(q.length){
+          const u = q.shift();
+          size++;
+          const ui = Math.floor(u / gridN), uj = u % gridN;
+          neighbors(ui,uj).forEach(nidx=>{
+            if(!visited[nidx] && (cells[nidx].state===2 || cells[nidx].state===3)){
+              visited[nidx]=1;
+              q.push(nidx);
+            }
+          });
+        }
+        if(size>largest) largest=size;
+      } else {
+        visited[idx]=1;
+      }
+    }
+  }
+  totalCellsEl.textContent = total;
+  coverPctEl.textContent = Math.round((cover/total)*100) + "%";
+  largestEl.textContent = largest;
+  patchesEl.textContent = patches;
+}
+
+canvas.addEventListener('click', (ev)=>{
+  const rect = canvas.getBoundingClientRect();
+  const x = ev.clientX - rect.left;
+  const y = ev.clientY - rect.top;
+  const j = Math.floor(x / cellW);
+  const i = Math.floor(y / cellH);
+  if(!inBounds(i,j)) return;
+  const idx = index(i,j);
+  if(ev.shiftKey){
+    // apply 5x5 nucleation centered
+    const r = 2;
+    for(let di=-r;di<=r;di++){
+      for(let dj=-r;dj<=r;dj++){
+        const ni=i+di, nj=j+dj;
+        if(inBounds(ni,nj)){
+          const id2 = index(ni,nj);
+          cells[id2].state = 1; cells[id2].timer = 0; // in restoration
+        }
+      }
+    }
+  } else {
+    if(modeToggle===0){
+      // cycle: degraded -> active -> restored -> natural -> degraded
+      const s = cells[idx].state;
+      cells[idx].state = (s+1)%4;
+      cells[idx].timer = 0;
+    } else {
+      // set to active restoration
+      cells[idx].state = 1; cells[idx].timer = 0;
+    }
+  }
+  computeMetrics();
+  draw();
+});
+
+// Controls
+document.getElementById('reset').addEventListener('click', ()=>{
+  gridN = parseInt(sizeInput.value);
+  computeCellSize();
+  makeEmptyGrid(gridN);
+  tick = 0; tickEl.textContent = tick;
+  draw();
+  computeMetrics();
+});
+
+document.getElementById('randomize').addEventListener('click', ()=>{
+  gridN = parseInt(sizeInput.value);
+  computeCellSize();
+  makeEmptyGrid(gridN);
+  randomizeGrid(0.12);
+  draw();
+  computeMetrics();
+});
+
+document.getElementById('nucleate').addEventListener('click', ()=>{
+  // create several nuclei of active restoration
+  const centers = Math.max(1, Math.floor(gridN/6));
+  for(let k=0;k<centers;k++){
+    const ci = Math.floor(Math.random()*gridN);
+    const cj = Math.floor(Math.random()*gridN);
+    const radius = 2 + Math.floor(Math.random()*3);
+    for(let di=-radius;di<=radius;di++){
+      for(let dj=-radius;dj<=radius;dj++){
+        const ni=ci+di, nj=cj+dj;
+        if(inBounds(ni,nj)){
+          cells[index(ni,nj)].state = 1;
+          cells[index(ni,nj)].timer = 0;
+        }
+      }
+    }
+  }
+  draw();
+  computeMetrics();
+});
+
+document.getElementById('step').addEventListener('click', ()=>{ stepSimulation(); });
+
+let runHandle = null;
+document.getElementById('run').addEventListener('click', function(){
+  running = !running;
+  this.textContent = running ? 'Pause' : 'Run';
+  if(running){
+    runHandle = setInterval(()=>{ stepSimulation(); }, +speed.value);
+  } else {
+    clearInterval(runHandle);
+  }
+});
+
+document.getElementById('apply').addEventListener('click', ()=>{
+  gridN = parseInt(sizeInput.value);
+  computeCellSize();
+  // keep existing cells if size same, otherwise recreate
+  makeEmptyGrid(gridN);
+  draw();
+  computeMetrics();
+});
+
+document.getElementById('seedRandom').addEventListener('click', ()=>{
+  randomizeGrid(0.12);
+  draw();
+  computeMetrics();
+});
+
+document.getElementById('modeToggle').addEventListener('click', ()=>{
+  modeToggle = (modeToggle+1)%2;
+  document.getElementById('modeLabel').textContent = modeToggle===0 ? 'Alternar' : 'Forçar restauração';
+});
+
+document.getElementById('clearRest').addEventListener('click', ()=>{
+  cells.forEach(c=>{ if(c.state===2) c.state = 0; });
+  draw(); computeMetrics();
+});
+
+speed.addEventListener('input', ()=>{ speedLabel.textContent = speed.value; if(running){ clearInterval(runHandle); runHandle = setInterval(()=> stepSimulation(), +speed.value); }});
+
+sizeInput.addEventListener('input', ()=> gridSizeLabel.textContent = sizeInput.value);
+pRegInput.addEventListener('input', ()=> pRegLabel.textContent = pRegInput.value);
+pDispInput.addEventListener('input', ()=> pDispLabel.textContent = pDispInput.value);
+restTimeInput.addEventListener('input', ()=> restTimeLabel.textContent = restTimeInput.value);
+
+// Export / Import
+document.getElementById('export').addEventListener('click', ()=>{
+  const data = {size:gridN,cells:cells};
+  const blob = new Blob([JSON.stringify(data)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'paisagem.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('doImport').addEventListener('click', ()=>{
+  const txt = document.getElementById('importArea').value;
+  try{
+    const obj = JSON.parse(txt);
+    if(obj.size && obj.cells && obj.cells.length === obj.size*obj.size){
+      gridN = obj.size;
+      sizeInput.value = gridN;
+      computeCellSize();
+      cells = obj.cells.map(c=>({state:c.state,timer:c.timer||0}));
+      draw(); computeMetrics();
+    } else alert('JSON inválido (tamanho ou células).');
+  }catch(e){ alert('JSON inválido'); }
+});
+
+document.getElementById('download').addEventListener('click', ()=>{
+  const obj = {size:gridN,cells:cells};
+  const data = JSON.stringify(obj);
+  const blob = new Blob([data],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'paisagem_export.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('importBtn').addEventListener('click', ()=>{
+  const txt = prompt('Cole JSON do cenário (size,cells).');
+  if(txt) {
+    try{
+      const obj = JSON.parse(txt);
+      if(obj.size && obj.cells && obj.cells.length===obj.size*obj.size){
+        gridN = obj.size; sizeInput.value = gridN;
+        computeCellSize();
+        cells = obj.cells.map(c=>({state:c.state,timer:c.timer||0}));
+        draw(); computeMetrics();
+      } else alert('JSON inválido');
+    }catch(e){ alert('JSON inválido'); }
+  }
+});
+
+// init
+(function init(){
+  gridN = parseInt(sizeInput.value);
+  computeCellSize();
+  makeEmptyGrid(gridN);
+  randomizeGrid(0.08);
+  draw();
+  computeMetrics();
+})();
+</script>
+</body>
+</html>
